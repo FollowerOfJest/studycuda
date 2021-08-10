@@ -1,0 +1,171 @@
+0_simple:
+	vectorAdd
+	vectorAdd_nvrtc
+	vectorAddDrv
+	vectorAddMMAP
+
+	asyncAPI: event : cudaEventCreate cudaEventRecord  cudaEventElapsedTime
+	cdpSimplePrint:  Dynamic Parallelism，动态并行，递归，kernel launch 自己
+
+	simpleStreams：介绍stream的，可以再看下下边的博文，重要的还是把书上stream章节好好看一遍
+	cdpSimpleQuicksort： 递归实现一个很简单的快速排序，没什么意义，启用的的block和thread都是1，主要还是看递归
+			cudaStreamCreateWithFlags 涉及一个非空流、空流 阻塞的行为
+			https://blog.csdn.net/qq_17239003/article/details/78994992
+			https://blog.csdn.net/huikougai2799/article/details/106135203
+
+
+	clock：这个例子用clock这个类型变量来算1个block全部完成花费的时间，最后全部block加起来算总的时间
+		验证随着grid的增加能掩盖mem访问。 clock()函数对应我们指令集的sl get time，是64bit的
+	clock_nvrtc
+	
+	 cppIntegration: 这个例子好像就是说在原本的cpp里边，然后引入1个cu，cu里边调用了各种kernel。应该是通过独立的cu文件的方法来改变之前串行cpp的逻辑
+	
+	cppOverload：kernel函数重载，相同kernel函数名，不同实现
+
+
+	cudaOpenMP：openmp的方式调用多gpu，omp.h是调动cpu的，#pragma omp parallel
+			应该是用cpu的多线程，1个线程或者n个cpu线程来启动kernel
+			####有时间可以看看openmp的书
+			visual studio里边要在属性里边c++语言那里开启openmp才可以使用，我用了下有8个线程
+	UnifiedMemoryStreams：
+	simpleMPI： ####MPI
+
+	
+	cudaTensorCoreGemm：看init里边，b应该是列方向存储的
+				只看了那个简单的kernel
+					验证了下，其实block中的维度从128，4调整为256，2    或512，1其实也都是ok的，128，2也是ok
+					这里边要看的就是那个a和b怎么load进来的，想明白load中对于a、b读取位置的理解
+					他等于是1次读1个frag，然后呢就是要算好每个frag的起始地址对于原来的row或col存储来说是在什么位置
+					如果没理解错，warpM决定arow，读A的一行， warpN决定bcol，一次读B的一列（B是col major）
+					哦对，设置参数block大小为32，1，其实是最好理解的。
+					来回改了几次block大小数值，然后看kernel中其实warpM和N的计算范围是一致的，那么所以重点就是在host那里grid大小的算法
+					host端分配grid大小的时候是不看K的相关值的。x方向一个grid处理 wmma_m*blockDim.x，y方向一个grid处理wmma_n*blockDim.y
+					wmma，他是在warp level去做的，所以kernel里边X方向上除以warpSize，等于整个warp的所有32个thread一起去load，计算、store
+					里边关于c_frag.x计算那部分，没有看到跟threadIdx有关的变量，那么说明frag对象的计算也是按照warp来的
+					frag.num_elements的数量，应该是frag的大小除以32，里边16x16的，那么就是32x8，好像不是这么理解的
+					看fragment的定义，里边accumulator中继承的frag_base父类，他的参数列表中8
+					不过好像就是32x8这么解释也没有错，看是看源码定义的地方这么理解accumulator c是ok的
+					https://developer.nvidia.com/zh-cn/blog/programming-tensor-cores-cuda-9/ 这里边关于完成那段文字说了不需要做矩阵到线程的映射
+					元素级的累加就可以了
+				复杂的kernel
+					看不懂啊，愁，我还是找个厂上班好了
+				
+				
+				
+	immaTensorCoreGemm:??? 额，v100也跑不了。。。
+	
+	p16ScalarProduct：	介绍fp16的，然后里边使用half2这个类型算的，其实就是pk_fp16
+
+	inlinePTX:在kernel中通过asm的方式调用ptx
+	inlinePTX_nvrtc
+
+	matrixMul：我好像觉得里边应该是BxA，不是AxB。
+		这个例子block是32x32，然后总大小是A是10x10个block，B是20x10个block
+		例子中 最终block的总数就是 20x10个
+		然后每个block都是用32x32个thread去一次load对应大小的A B到smem中
+		根据block id的坐标，每次从A、B对应的大矩阵中找到对应的行block和列block，A、B都以对应的step进行前进
+		（block 的x，y，应该就是最终结果矩阵对应的位置，然后我们通过这个位置找到A、B的 行或者列）
+		每次前进，都是用thread x，y算完1个32x32的乘累加。
+		思考smem：这里边smem，每一个block有一个smem，他的大小是32x32，每次用1个thread把对应的子块读到smemA和smemB中
+		然后沿K方向的运算的时候对应的As、Bs中取数据计算。
+
+		
+	matrixMul_nvrtc
+	matrixMulCUBLAS
+	matrixMulDrv
+	memMapIPCDrv
+
+	simpleAssert
+	simpleAssert_nvrtc
+
+	simpleAtomicIntrinsics
+	simpleAtomicIntrinsics_nvrtc
+
+	simpleCallback：用c++多线程pthread_create，去启动多个gpu kernel，kernel是通过stream启动的
+			cudaStreamAddCallback 回调函数，在流中任意位置插入一个回调函数点，device完成后控制权交给host端调用回到函数，然后再回到device
+			https://blog.csdn.net/csgxy123/article/details/10948417
+	
+	simpleCooperativeGroups： 程序本质上做了一个0到63个线程的规约累加 
+				thread_block有一个这个类型，cuda里边说了就是一个block中的所有thread，可以通过的一些函数thread_rank获取id信息，sync同步
+				官方解释中说它代表了一个block，在运行时才知道他的维度
+				thread_block_tile，传入thread_block对象，可以根据线程数量划分，例子里边是16个线程1组
+				这个类型也依然有thread_rank这个函数,然后例子里边又对每一个tile类型的0-15的id做了一次sum reduction
+	
+	simpleCubemapTexture： 图形学的貌似
+	simpleCudaGraphs：图形学的
+	simpleLayeredTexture： 图形学
+	Pitch Linear Textures：
+	simpleSurfaceWrite：
+	simpleTexture：
+	simpleTextureDrv：
+
+
+	simpleDrvRuntime：drv api和runtime api一起工作来调用内核函数
+	
+	simpleIPC：？？？ 进程间通信
+		https://zhuanlan.zhihu.com/p/339715714
+		https://blog.csdn.net/xholes/article/details/106590564
+
+	simpleMultiCopy：用stream来把 copy时间和kernel执行时间给overlap掉， event来计时
+
+	simpleMultiGPU：多gpu
+	simpleP2P：多gpu之间p2p拷贝
+
+	simpleOccupancy：cudaOccupancyMaxPotentialBlockSize这里有个函数，提供了最大device占用情况下的grid和block size，smem大小
+			他通过true false执行了两遍函数，一次是默认的，一次是用上边函数的最推荐的值
+			然后用cudaOccupancyMaxActiveBlocksPerMultiprocessor函数提供的结果来算占用率（激活的warp除以总共最大支持的warp数）
+
+	
+	simplePrintf：kernel里能用printf
+
+	simpleSeparateCompilation：有一个device函数的库，然后里边函数都是extern的，主cu文件include了，然后用函数指针把这些库给引用起来
+				关键在于独立编译，没太明白
+
+	simpleTemplates： 模板来控制执行，T，device函数的模板
+	simpleTemplates_nvrtc
+
+	simpleVoteIntrinsics：就是举例了__any_sync，__all_sync 这两个函数，还有一系列相关的被称为VOTE函数
+			https://zhuanlan.zhihu.com/p/347832385
+	simpleVoteIntrinsics_nvrtc：
+
+	simpleZeroCopy：零拷贝内存
+
+	template：无用
+	
+
+
+6_advanced：
+	alignedTypes：能用的总mem，然后除以sizeof(type)总共有多少元素
+			不同struct对于copy性能的影响，__align__ 这个关键字可以提示编译器再n字节边界上对齐变量
+			https://www.cnblogs.com/xidongs/p/5655440.html   这里还介绍了#pragma pack
+			
+	
+
+
+	
+	
+
+	
+	
+	
+	
+	
+
+	
+	
+
+	
+	
+
+	
+
+	
+
+	
+	
+	
+			
+	
+	
+	
+	
